@@ -6,6 +6,7 @@ import StudentRegistration from './components/StudentRegistration';
 import AttendanceLog from './components/AttendanceLog';
 import ActiveVisitors from './components/ActiveVisitors';
 import 'bootstrap/dist/css/bootstrap.min.css';
+import 'bootstrap/dist/js/bootstrap.bundle.min.js';
 import './assets/css/App.css';
 
 function App() {
@@ -24,5 +25,4 @@ function App() {
 }
 
 export default App;
-
 

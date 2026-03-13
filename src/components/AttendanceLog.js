@@ -1,328 +1,416 @@
-import React, { useState } from 'react';
-import axios from 'axios';
+import React, { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { attendanceApi, buildAssetUrl, studentApi } from '../services/api';
+
+const PURPOSE_OPTIONS = [
+  {
+    value: 'Study',
+    shortLabel: 'Quiet Study',
+    description: 'Individual reading, review, and seat usage.'
+  },
+  {
+    value: 'Research',
+    shortLabel: 'Research',
+    description: 'Academic research, references, and thesis work.'
+  },
+  {
+    value: 'Borrow Books',
+    shortLabel: 'Borrowing',
+    description: 'Book release, return, and shelf assistance.'
+  },
+  {
+    value: 'Used Computer',
+    shortLabel: 'Computer Use',
+    description: 'Computer access for school-related tasks.'
+  },
+  {
+    value: 'Library Card Application',
+    shortLabel: 'Library Card',
+    description: 'New card requests and account concerns.'
+  }
+];
 
 function AttendanceLog() {
   const [studentId, setStudentId] = useState('');
   const [purpose, setPurpose] = useState('');
   const [student, setStudent] = useState(null);
-  const [message, setMessage] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
+  const [feedback, setFeedback] = useState(null);
+  const [activeVisitors, setActiveVisitors] = useState([]);
+  const [lastUpdated, setLastUpdated] = useState('');
+  const [searchAttempted, setSearchAttempted] = useState(false);
+  const [isSearching, setIsSearching] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isRefreshingVisitors, setIsRefreshingVisitors] = useState(false);
+  const [screenTime, setScreenTime] = useState(new Date());
+  const [showStudentImage, setShowStudentImage] = useState(false);
 
-  const purposes = [
-    { value: "Study", icon: "📚", color: "#800000" },
-    { value: "Research", icon: "🔬", color: "#A0522D" },
-    { value: "Borrow Books", icon: "📖", color: "#CD853F" },
-    { value: "Used Computer", icon: "💻", color: "#D2691E" },
-    { value: "Library Card Application", icon: "🆔", color: "#B22222" }
-  ];
+  useEffect(() => {
+    fetchActiveVisitors(true);
 
-  const searchStudent = async () => {
-    if (!studentId.trim()) {
-      setMessage('Please enter a student ID');
+    const clock = setInterval(() => {
+      setScreenTime(new Date());
+    }, 60000);
+
+    return () => clearInterval(clock);
+  }, []);
+
+  useEffect(() => {
+    setShowStudentImage(Boolean(student?.profile_image));
+  }, [student]);
+
+  const fetchActiveVisitors = async (initialLoad = false) => {
+    if (!initialLoad) {
+      setIsRefreshingVisitors(true);
+    }
+
+    try {
+      const response = await attendanceApi.getActive();
+      setActiveVisitors(response.data);
+      setLastUpdated(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+    } catch (error) {
+      console.error('Error fetching active visitors:', error);
+      setFeedback({
+        type: 'danger',
+        text: 'Unable to load the active visitor list right now.'
+      });
+    } finally {
+      setIsRefreshingVisitors(false);
+    }
+  };
+
+  const resetAttendanceForm = (preserveFeedback = false) => {
+    setStudentId('');
+    setStudent(null);
+    setPurpose('');
+    setSearchAttempted(false);
+    setShowStudentImage(false);
+    if (!preserveFeedback) {
+      setFeedback(null);
+    }
+  };
+
+  const handleSearch = async () => {
+    const query = studentId.trim();
+
+    if (!query) {
+      setFeedback({ type: 'warning', text: 'Enter a student ID or name before searching.' });
+      setStudent(null);
       return;
     }
 
-    setIsLoading(true);
-    setMessage('');
-    
+    setIsSearching(true);
+    setSearchAttempted(true);
+    setFeedback(null);
+
     try {
-      console.log('Searching for student:', studentId);
-      const response = await axios.get(`http://localhost:3001/api/students/search?q=${studentId}`);
-      console.log('Search response:', response.data);
-      
-      if (response.data.length > 0) {
-        setStudent(response.data[0]);
-        setMessage('');
-      } else {
+      const response = await studentApi.search(query);
+      const exactMatch = response.data.find((item) => item.student_id === query);
+      const matchedStudent = exactMatch || response.data[0] || null;
+
+      if (!matchedStudent) {
         setStudent(null);
-        setMessage('Student not found');
+        setFeedback({
+          type: 'warning',
+          text: 'No student matched that search. You can register the student if needed.'
+        });
+        return;
       }
+
+      setStudent(matchedStudent);
+      setFeedback({
+        type: 'info',
+        text: `Student record loaded for ${matchedStudent.first_name} ${matchedStudent.last_name}.`
+      });
     } catch (error) {
       console.error('Search error:', error);
-      setMessage('Error searching student');
+      setStudent(null);
+      setFeedback({
+        type: 'danger',
+        text: error.response?.data?.error || 'Error searching for student.'
+      });
     } finally {
-      setIsLoading(false);
+      setIsSearching(false);
     }
   };
 
   const handleCheckIn = async () => {
     if (!student || !purpose) {
-      setMessage('Please select a student and purpose');
+      setFeedback({
+        type: 'warning',
+        text: 'Select a student and a library purpose before submitting attendance.'
+      });
       return;
     }
 
-    setIsLoading(true);
-    
+    setIsSubmitting(true);
+
     try {
-      console.log('Checking in student:', { student_id: student.student_id, purpose });
-      const response = await axios.post('http://localhost:3001/api/attendance/checkin', {
+      const response = await attendanceApi.checkIn({
         student_id: student.student_id,
-        purpose: purpose
+        purpose
       });
-      console.log('Check-in response:', response.data);
-      
-      setMessage('✅ Check-in successful! Welcome to the library!');
-      // Reset form
-      setStudentId('');
-      setPurpose('');
-      setStudent(null);
+
+      setFeedback({
+        type: 'success',
+        text: `${response.data.student_name} checked in successfully at ${new Date().toLocaleTimeString([], {
+          hour: '2-digit',
+          minute: '2-digit'
+        })}.`
+      });
+      resetAttendanceForm(true);
+      fetchActiveVisitors();
     } catch (error) {
       console.error('Check-in error:', error);
-      setMessage(error.response?.data?.error || 'Error during check-in');
+      setFeedback({
+        type: 'danger',
+        text: error.response?.data?.error || 'Error during check-in.'
+      });
     } finally {
-      setIsLoading(false);
+      setIsSubmitting(false);
     }
   };
 
+  const selectedPurpose = PURPOSE_OPTIONS.find((item) => item.value === purpose);
+  const heroDate = screenTime.toLocaleDateString([], {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric'
+  });
+
   return (
     <div className="container mt-4">
-      {/* Header Section with Animation */}
-      <div className="text-center mb-5">
-        <div className="d-flex justify-content-center align-items-center mb-3">
-          <div className="me-3">
-            <div className="bg-primary rounded-circle d-flex align-items-center justify-content-center" 
-                 style={{ width: '80px', height: '80px', backgroundColor: '#800000' }}>
-              <i className="bi bi-person-check text-white" style={{ fontSize: '2rem' }}></i>
-            </div>
-          </div>
-          <div>
-            <h1 className="display-4 fw-bold text-dark mb-0">Library Check-In</h1>
-            <p className="lead text-muted">Welcome to Goa Community Library</p>
+      <section className="attendance-hero">
+        <div className="attendance-hero-copy">
+          <p className="section-eyebrow">Goa Community College</p>
+          <h1 className="attendance-hero-title">Library Attendance and Visitor Monitoring</h1>
+          <p className="attendance-hero-text">
+            Manage student check-ins quickly, verify records before entry, and keep the active visitor list visible at the desk.
+          </p>
+          <div className="attendance-hero-meta">
+            <span>{heroDate}</span>
+            <span>{screenTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
           </div>
         </div>
-      </div>
 
-      <div className="row justify-content-center">
-        <div className="col-lg-10">
-          <div className="card shadow-lg border-0" style={{ borderRadius: '20px' }}>
-            <div className="card-header text-white text-center py-4" 
-                 style={{ 
-                   backgroundColor: '#800000', 
-                   borderRadius: '20px 20px 0 0',
-                   background: 'linear-gradient(135deg, #800000 0%, #A0522D 100%)'
-                 }}>
-              <h3 className="mb-0">
-                <i className="bi bi-clock-history me-2"></i>
-                Student Attendance System
-              </h3>
-              <p className="mb-0 mt-2 opacity-75">Quick and easy check-in process</p>
+        <div className="attendance-hero-brand">
+          <img src="/GCC-LOGO.png" alt="Goa Community College logo" className="attendance-hero-logo" />
+          <div>
+            <strong>GCC Library Services</strong>
+            <p className="mb-0">Attendance desk for student visits and activity tracking.</p>
+          </div>
+        </div>
+      </section>
+
+      <div className="row g-4">
+        <div className="col-xl-8">
+          <div className="attendance-panel">
+            <div className="attendance-summary-grid">
+              <div className="attendance-summary-card">
+                <span className="summary-label">Active now</span>
+                <strong>{activeVisitors.length}</strong>
+                <small>Students currently inside the library.</small>
+              </div>
+              <div className="attendance-summary-card">
+                <span className="summary-label">Selected purpose</span>
+                <strong>{selectedPurpose ? selectedPurpose.shortLabel : 'Not selected'}</strong>
+                <small>{selectedPurpose ? selectedPurpose.description : 'Choose the activity before check-in.'}</small>
+              </div>
+              <div className="attendance-summary-card">
+                <span className="summary-label">Current status</span>
+                <strong>{student ? 'Ready to check in' : 'Waiting for search'}</strong>
+                <small>{student ? `${student.first_name} ${student.last_name} is loaded.` : 'Search by student ID or full name.'}</small>
+              </div>
             </div>
-            
-            <div className="card-body p-5">
-              <div className="row">
-                {/* Left Side - Input Form */}
-                <div className="col-lg-6">
-                  <div className="mb-4">
-                    <label className="form-label fw-bold text-dark mb-3">
-                      <i className="bi bi-search me-2"></i>Search Student
-                    </label>
-                    <div className="input-group input-group-lg">
-                      <span className="input-group-text bg-light border-end-0">
-                        <i className="bi bi-person-badge text-muted"></i>
-                      </span>
-                      <input
-                        type="text"
-                        className="form-control border-start-0"
-                        value={studentId}
-                        onChange={(e) => setStudentId(e.target.value)}
-                        placeholder="Enter Student ID"
-                        onKeyPress={(e) => e.key === 'Enter' && searchStudent()}
-                        style={{ fontSize: '1.1rem' }}
-                      />
-                      <button 
-                        className="btn btn-outline-primary"
-                        onClick={searchStudent}
-                        disabled={isLoading || !studentId.trim()}
-                      >
-                        {isLoading ? (
-                          <span className="spinner-border spinner-border-sm me-2"></span>
-                        ) : (
-                          <i className="bi bi-search me-2"></i>
-                        )}
-                        Search
-                      </button>
+
+            <div className="row g-4">
+              <div className="col-lg-7">
+                <div className="attendance-block">
+                  <div className="d-flex justify-content-between align-items-start gap-3 mb-3">
+                    <div>
+                      <p className="section-eyebrow">Step 1</p>
+                      <h4 className="mb-1">Find the student record</h4>
+                      <p className="text-muted mb-0">Search by student number for the fastest match.</p>
                     </div>
+                    <button
+                      type="button"
+                      className="btn btn-outline-secondary btn-sm"
+                      onClick={resetAttendanceForm}
+                    >
+                      Clear
+                    </button>
+                  </div>
+
+                  <div className="input-group input-group-lg mb-4">
+                    <input
+                      type="text"
+                      className="form-control"
+                      value={studentId}
+                      onChange={(event) => setStudentId(event.target.value)}
+                      placeholder="Enter student ID or full name"
+                      onKeyDown={(event) => event.key === 'Enter' && handleSearch()}
+                    />
+                    <button
+                      type="button"
+                      className="btn btn-maroon"
+                      onClick={handleSearch}
+                      disabled={isSearching}
+                    >
+                      {isSearching ? 'Searching...' : 'Search'}
+                    </button>
                   </div>
 
                   <div className="mb-4">
-                    <label className="form-label fw-bold text-dark mb-3">
-                      <i className="bi bi-list-check me-2"></i>Select Purpose
-                    </label>
-                    <div className="row g-2">
-                      {purposes.map((purposeItem, index) => (
-                        <div key={purposeItem.value} className="col-6">
-                          <button
-                            className={`btn w-100 py-3 border-2 ${
-                              purpose === purposeItem.value 
-                                ? 'text-white' 
-                                : 'btn-outline-secondary'
-                            }`}
-                            style={{
-                              backgroundColor: purpose === purposeItem.value ? purposeItem.color : 'transparent',
-                              borderColor: purposeItem.color,
-                              borderRadius: '15px',
-                              transition: 'all 0.3s ease'
-                            }}
-                            onClick={() => setPurpose(purposeItem.value)}
-                          >
-                            <div className="d-flex flex-column align-items-center">
-                              <span style={{ fontSize: '1.5rem' }}>{purposeItem.icon}</span>
-                              <small className="fw-bold">{purposeItem.value}</small>
-                            </div>
-                          </button>
-                        </div>
+                    <p className="section-eyebrow">Step 2</p>
+                    <h5 className="mb-3">Select purpose of visit</h5>
+                    <div className="purpose-grid">
+                      {PURPOSE_OPTIONS.map((option) => (
+                        <button
+                          key={option.value}
+                          type="button"
+                          className={`purpose-option ${purpose === option.value ? 'purpose-option-active' : ''}`}
+                          onClick={() => setPurpose(option.value)}
+                        >
+                          <strong>{option.shortLabel}</strong>
+                          <span>{option.description}</span>
+                        </button>
                       ))}
                     </div>
                   </div>
 
-                  <div className="d-grid">
-                    <button 
-                      className="btn btn-lg text-white fw-bold py-3"
-                      style={{ 
-                        backgroundColor: '#800000',
-                        borderRadius: '15px',
-                        background: 'linear-gradient(135deg, #800000 0%, #A0522D 100%)',
-                        border: 'none',
-                        boxShadow: '0 4px 15px rgba(128, 0, 0, 0.3)'
-                      }}
-                      onClick={handleCheckIn}
-                      disabled={!student || !purpose || isLoading}
-                    >
-                      {isLoading ? (
-                        <>
-                          <span className="spinner-border spinner-border-sm me-2"></span>
-                          Processing...
-                        </>
-                      ) : (
-                        <>
-                          <i className="bi bi-check-circle me-2"></i>
-                          Check In Student
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </div>
+                  {feedback && (
+                    <div className={`alert alert-${feedback.type} attendance-alert`} role="alert">
+                      {feedback.text}
+                    </div>
+                  )}
 
-                {/* Right Side - Student Info & Status */}
-                <div className="col-lg-6">
                   {student ? (
-                    <div className="card border-0 shadow-sm h-100" style={{ borderRadius: '15px' }}>
-                      <div className="card-header text-white text-center py-3" 
-                           style={{ 
-                             backgroundColor: '#800000',
-                             borderRadius: '15px 15px 0 0'
-                           }}>
-                        <h5 className="mb-0">
-                          <i className="bi bi-person-check me-2"></i>
-                          Student Found
-                        </h5>
+                    <div className="student-preview-card">
+                      <div className="student-preview-header">
+                        <div className="student-preview-avatar">
+                          {student.profile_image && showStudentImage ? (
+                            <img
+                              src={buildAssetUrl(student.profile_image)}
+                              alt={`${student.first_name} ${student.last_name}`}
+                              onError={() => setShowStudentImage(false)}
+                            />
+                          ) : (
+                            <span>{student.first_name?.[0] || 'S'}{student.last_name?.[0] || 'T'}</span>
+                          )}
+                        </div>
+                        <div>
+                          <h4 className="mb-1">{student.first_name} {student.last_name}</h4>
+                          <p className="text-muted mb-0">{student.student_id}</p>
+                        </div>
                       </div>
-                      <div className="card-body p-4">
-                        <div className="text-center mb-4">
-                          <div className="bg-light rounded-circle d-inline-flex align-items-center justify-content-center mb-3"
-                               style={{ width: '80px', height: '80px' }}>
-                            <i className="bi bi-person-fill text-muted" style={{ fontSize: '2.5rem' }}></i>
-                          </div>
-                          <h4 className="fw-bold text-dark mb-1">
-                            {student.first_name} {student.last_name}
-                          </h4>
-                          <p className="text-muted mb-0">Student ID: {student.student_id}</p>
-                        </div>
-                        
-                        <div className="row g-3">
-                          <div className="col-6">
-                            <div className="text-center p-3 bg-light rounded-3">
-                              <i className="bi bi-book text-primary mb-2" style={{ fontSize: '1.5rem' }}></i>
-                              <h6 className="fw-bold mb-1">Course</h6>
-                              <p className="mb-0 text-dark">{student.course}</p>
-                            </div>
-                          </div>
-                          <div className="col-6">
-                            <div className="text-center p-3 bg-light rounded-3">
-                              <i className="bi bi-calendar text-success mb-2" style={{ fontSize: '1.5rem' }}></i>
-                              <h6 className="fw-bold mb-1">Year & Section</h6>
-                              <p className="mb-0 text-dark">{student.year_level}-{student.section}</p>
-                            </div>
-                          </div>
-                        </div>
 
-                        {purpose && (
-                          <div className="mt-4 p-3 rounded-3" 
-                               style={{ backgroundColor: '#f8f9fa', border: '2px solid #800000' }}>
-                            <div className="d-flex align-items-center">
-                              <span className="me-3" style={{ fontSize: '1.5rem' }}>
-                                {purposes.find(p => p.value === purpose)?.icon}
-                              </span>
-                              <div>
-                                <h6 className="fw-bold mb-1 text-dark">Selected Purpose</h6>
-                                <p className="mb-0 text-muted">{purpose}</p>
-                              </div>
-                            </div>
-                          </div>
-                        )}
+                      <div className="student-preview-details">
+                        <div>
+                          <span>Course</span>
+                          <strong>{student.course}</strong>
+                        </div>
+                        <div>
+                          <span>Year and section</span>
+                          <strong>{student.year_level}-{student.section}</strong>
+                        </div>
+                        <div>
+                          <span>Email</span>
+                          <strong>{student.email || 'No email on file'}</strong>
+                        </div>
+                      </div>
+
+                      <div className="d-flex flex-wrap gap-2 mt-4">
+                        <button
+                          type="button"
+                          className="btn btn-maroon btn-lg"
+                          onClick={handleCheckIn}
+                          disabled={isSubmitting || !purpose}
+                        >
+                          {isSubmitting ? 'Processing...' : 'Confirm check-in'}
+                        </button>
+                        <Link to="/" className="btn btn-outline-secondary btn-lg">
+                          View analytics
+                        </Link>
                       </div>
                     </div>
                   ) : (
-                    <div className="card border-0 shadow-sm h-100 d-flex align-items-center justify-content-center" 
-                         style={{ borderRadius: '15px', minHeight: '400px' }}>
-                      <div className="text-center text-muted">
-                        <i className="bi bi-person-search" style={{ fontSize: '4rem' }}></i>
-                        <h5 className="mt-3 mb-2">Search for a Student</h5>
-                        <p className="mb-0">Enter a student ID to begin the check-in process</p>
-                      </div>
+                    <div className="attendance-empty-state">
+                      <h5 className="mb-2">No student selected yet</h5>
+                      <p className="text-muted mb-3">
+                        Search the student record first, then pick the purpose to complete attendance.
+                      </p>
+                      {searchAttempted && (
+                        <Link to="/register" className="btn btn-outline-maroon">
+                          Register new student
+                        </Link>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="col-lg-5">
+                <div className="attendance-block h-100">
+                  <div className="d-flex justify-content-between align-items-start gap-3 mb-3">
+                    <div>
+                      <p className="section-eyebrow">Live Desk View</p>
+                      <h4 className="mb-1">Current visitors</h4>
+                      <p className="text-muted mb-0">
+                        {lastUpdated ? `Last updated at ${lastUpdated}` : 'Loading current visitors'}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      className="btn btn-outline-secondary btn-sm"
+                      onClick={() => fetchActiveVisitors()}
+                      disabled={isRefreshingVisitors}
+                    >
+                      {isRefreshingVisitors ? 'Refreshing...' : 'Refresh'}
+                    </button>
+                  </div>
+
+                  {activeVisitors.length === 0 ? (
+                    <div className="attendance-empty-state compact">
+                      <h6 className="mb-2">Library floor is clear</h6>
+                      <p className="mb-0 text-muted">No active student visit is currently open.</p>
+                    </div>
+                  ) : (
+                    <div className="visitor-feed">
+                      {activeVisitors.slice(0, 6).map((visitor) => (
+                        <div key={visitor.id} className="visitor-feed-item">
+                          <div>
+                            <strong>{visitor.first_name} {visitor.last_name}</strong>
+                            <p className="mb-1">{visitor.student_id} · {visitor.course} {visitor.year_level}-{visitor.section}</p>
+                            <span>{visitor.purpose}</span>
+                          </div>
+                          <div className="visitor-feed-meta">
+                            <strong>{visitor.minutes_inside} min</strong>
+                            <small>inside</small>
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   )}
 
-                  {/* Message Display */}
-                  {message && (
-                    <div className={`alert alert-dismissible fade show mt-4 ${
-                      message.includes('Error') || message.includes('not found') 
-                        ? 'alert-danger' 
-                        : 'alert-success'
-                    }`} style={{ borderRadius: '15px' }}>
-                      <div className="d-flex align-items-center">
-                        <i className={`bi ${
-                          message.includes('Error') || message.includes('not found')
-                            ? 'bi-exclamation-triangle'
-                            : 'bi-check-circle'
-                        } me-2`} style={{ fontSize: '1.2rem' }}></i>
-                        <span className="fw-bold">{message}</span>
-                      </div>
-                      <button 
-                        type="button" 
-                        className="btn-close" 
-                        onClick={() => setMessage('')}
-                      ></button>
-                    </div>
-                  )}
+                  <Link to="/active" className="btn btn-outline-maroon w-100 mt-3">
+                    Open full active visitor list
+                  </Link>
                 </div>
               </div>
             </div>
           </div>
         </div>
-      </div>
 
-      {/* Quick Stats */}
-      <div className="row mt-5">
-        <div className="col-md-4">
-          <div className="card border-0 shadow-sm text-center p-4" style={{ borderRadius: '15px' }}>
-            <i className="bi bi-people text-primary mb-3" style={{ fontSize: '2.5rem' }}></i>
-            <h4 className="fw-bold text-dark">Easy Check-In</h4>
-            <p className="text-muted mb-0">Quick and simple student verification process</p>
-          </div>
-        </div>
-        <div className="col-md-4">
-          <div className="card border-0 shadow-sm text-center p-4" style={{ borderRadius: '15px' }}>
-            <i className="bi bi-shield-check text-success mb-3" style={{ fontSize: '2.5rem' }}></i>
-            <h4 className="fw-bold text-dark">Secure System</h4>
-            <p className="text-muted mb-0">Safe and reliable attendance tracking</p>
-          </div>
-        </div>
-        <div className="col-md-4">
-          <div className="card border-0 shadow-sm text-center p-4" style={{ borderRadius: '15px' }}>
-            <i className="bi bi-graph-up text-info mb-3" style={{ fontSize: '2.5rem' }}></i>
-            <h4 className="fw-bold text-dark">Real-time Data</h4>
-            <p className="text-muted mb-0">Instant updates and analytics</p>
+        <div className="col-xl-4">
+          <div className="attendance-side-note">
+            <p className="section-eyebrow">Desk Guide</p>
+            <h4 className="mb-3">Recommended staff workflow</h4>
+            <ol className="mb-0">
+              <li>Search the student using the official student number.</li>
+              <li>Confirm course and section before selecting the visit purpose.</li>
+              <li>Use the active visitor panel to avoid duplicate open attendance records.</li>
+              <li>Register the student immediately if no record exists in the database.</li>
+            </ol>
           </div>
         </div>
       </div>

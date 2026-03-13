@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import axios from 'axios';
+import { studentApi } from '../services/api';
 
 function Dashboard() {
   const [searchTerm, setSearchTerm] = useState('');
@@ -7,7 +7,7 @@ function Dashboard() {
 
   const handleSearch = async () => {
     try {
-      const response = await axios.get(`http://localhost:3001/api/students/search?q=${searchTerm}`);
+      const response = await studentApi.search(searchTerm);
       setStudent(response.data[0] || null);
     } catch (error) {
       console.error('Search error:', error);

@@ -112,20 +112,26 @@ router.get('/profile/:student_id', (req, res) => {
 
 // Search students
 router.get('/search', (req, res) => {
-    const searchTerm = req.query.q;
+    const searchTerm = `${req.query.q || ''}`.trim();
     console.log('Searching for student:', searchTerm); // Debug log
 
     if (!searchTerm) {
         return res.status(400).json({ error: 'Search term is required' });
     }
 
+    const likeTerm = `%${searchTerm}%`;
     const query = `
         SELECT * FROM students 
-        WHERE student_id = ? 
-        OR CONCAT(first_name, ' ', last_name) LIKE ?
+        WHERE student_id = ?
+        OR student_id LIKE ?
+        OR first_name LIKE ?
+        OR last_name LIKE ?
+        OR CONCAT_WS(' ', first_name, middle_name, last_name) LIKE ?
+        ORDER BY last_name ASC, first_name ASC
+        LIMIT 12
     `;
     
-    db.query(query, [searchTerm, `%${searchTerm}%`], (err, results) => {
+    db.query(query, [searchTerm, likeTerm, likeTerm, likeTerm, likeTerm], (err, results) => {
         if (err) {
             console.error('Database error:', err);
             return res.status(500).json({ 
@@ -202,6 +208,12 @@ router.post('/', upload.single('profile_image'), (req, res) => {
             if (req.file) {
                 fs.unlinkSync(req.file.path);
             }
+
+            if (err.code === 'ER_DUP_ENTRY') {
+                res.status(409).json({ error: 'Student ID already exists' });
+                return;
+            }
+
             res.status(500).json({ error: err.message });
             return;
         }

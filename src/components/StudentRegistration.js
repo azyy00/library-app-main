@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import axios from 'axios';
+import { studentApi } from '../services/api';
 
 function StudentRegistration() {
   const [formData, setFormData] = useState({
@@ -12,7 +12,7 @@ function StudentRegistration() {
     email: '',
     gender: '',
     course: '',
-    year_level: 0,
+    year_level: '',
     section: '',
     profile_image: null,
   });
@@ -37,7 +37,7 @@ function StudentRegistration() {
         submitData.append('profile_image', formData.profile_image);
       }
       
-      const response = await axios.post('http://localhost:3001/api/students', submitData, {
+      const response = await studentApi.create(submitData, {
         headers: {
           'Content-Type': 'multipart/form-data'
         }
@@ -48,7 +48,8 @@ function StudentRegistration() {
       handleClear(); // Clear form after successful submission
     } catch (error) {
       console.error('Registration error:', error);
-      setMessage(error.response?.data?.error || 'Error registering student');
+      const errorMessage = error.response?.data?.error || 'Error registering student';
+      setMessage(`Error: ${errorMessage}`);
     }
   };
 
@@ -56,6 +57,7 @@ function StudentRegistration() {
     const file = e.target.files[0];
     if (file) {
       setFormData({...formData, profile_image: file});
+      setMessage('');
       
       // Create preview URL
       const reader = new FileReader();
@@ -77,11 +79,12 @@ function StudentRegistration() {
       email: '',
       gender: '',
       course: '',
-      year_level: 0,
+      year_level: '',
       section: '',
       profile_image: null,
     });
     setImagePreview(null);
+    setMessage('');
   };
 
   return (
@@ -90,7 +93,10 @@ function StudentRegistration() {
         <div className="card-header text-white" style={{ backgroundColor: '#800000' }}>
           <div className="d-flex align-items-center">
             <img src="/GCC-LOGO.png" alt="GCC Logo" height="40" className="me-2" style={{ borderRadius: '50%' }} />
-            <h3 className="mb-0">Student Registration Form</h3>
+            <div>
+              <h3 className="mb-0">Student Registration Form</h3>
+              <small className="opacity-75">Create student records before check-in begins.</small>
+            </div>
           </div>
         </div>
         <div className="card-body">
@@ -169,7 +175,43 @@ function StudentRegistration() {
                   <option value="">Select Gender</option>
                   <option value="Male">Male</option>
                   <option value="Female">Female</option>
+                  <option value="Other">Other</option>
                 </select>
+              </div>
+            </div>
+
+            <div className="row">
+              <div className="col-md-6 mb-3">
+                <label className="form-label">Email Address</label>
+                <input
+                  type="email"
+                  className="form-control"
+                  placeholder="Enter school or personal email"
+                  value={formData.email}
+                  onChange={(e) => setFormData({...formData, email: e.target.value})}
+                />
+              </div>
+              <div className="col-md-6 mb-3">
+                <label className="form-label">Profile Picture</label>
+                <div className="d-flex gap-3 align-items-center">
+                  <input
+                    type="file"
+                    className="form-control"
+                    accept="image/*"
+                    onChange={handleImageChange}
+                  />
+                  {imagePreview && (
+                    <div className="text-center">
+                      <img 
+                        src={imagePreview} 
+                        alt="Preview" 
+                        className="rounded-circle"
+                        style={{ width: '60px', height: '60px', objectFit: 'cover' }}
+                      />
+                      <small className="d-block text-muted">Preview</small>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -194,6 +236,8 @@ function StudentRegistration() {
                   type="number"
                   className="form-control"
                   required
+                  min="1"
+                  max="8"
                   placeholder="Enter Year Level"
                   value={formData.year_level}
                   onChange={(e) => setFormData({...formData, year_level: e.target.value})}
@@ -209,33 +253,6 @@ function StudentRegistration() {
                   value={formData.section}
                   onChange={(e) => setFormData({...formData, section: e.target.value})}
                 />
-              </div>
-            </div>
-
-            <div className="row">
-              <div className="col-md-6">
-                <div className="mb-3">
-                  <label className="form-label">Profile Picture</label>
-                  <div className="d-flex gap-3 align-items-center">
-                    <input
-                      type="file"
-                      className="form-control"
-                      accept="image/*"
-                      onChange={handleImageChange}
-                    />
-                    {imagePreview && (
-                      <div className="text-center">
-                        <img 
-                          src={imagePreview} 
-                          alt="Preview" 
-                          className="rounded-circle"
-                          style={{ width: '60px', height: '60px', objectFit: 'cover' }}
-                        />
-                        <small className="d-block text-muted">Preview</small>
-                      </div>
-                    )}
-                  </div>
-                </div>
               </div>
             </div>
 
